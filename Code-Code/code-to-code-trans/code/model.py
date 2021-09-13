@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation. 
+# Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
 
 import torch
@@ -6,21 +6,25 @@ import torch.nn as nn
 import torch
 from torch.autograd import Variable
 import copy
+import transformers
+
+
 class Seq2Seq(nn.Module):
     """
         Build Seqence-to-Sequence.
-        
+
         Parameters:
 
         * `encoder`- encoder of seq2seq model. e.g. roberta
         * `decoder`- decoder of seq2seq model. e.g. transformer
-        * `config`- configuration of encoder model. 
-        * `beam_size`- beam size for beam search. 
-        * `max_length`- max length of target for beam search. 
+        * `config`- configuration of encoder model.
+        * `beam_size`- beam size for beam search.
+        * `max_length`- max length of target for beam search.
         * `sos_id`- start of symbol ids in target for beam search.
-        * `eos_id`- end of symbol ids in target for beam search. 
+        * `eos_id`- end of symbol ids in target for beam search.
     """
-    def __init__(self, encoder,decoder,config,beam_size=None,max_length=None,sos_id=None,eos_id=None):
+    def __init__(self, encoder,decoder,config,beam_size=None,max_length=None,
+                 sos_id=None,eos_id=None,model_type=None,trainer=False):
         super(Seq2Seq, self).__init__()
         self.encoder = encoder
         self.decoder=decoder
@@ -29,13 +33,15 @@ class Seq2Seq(nn.Module):
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.lsm = nn.LogSoftmax(dim=-1)
+        self.model_type=model_type
         self.tie_weights()
-        
+
         self.beam_size=beam_size
         self.max_length=max_length
         self.sos_id=sos_id
         self.eos_id=eos_id
-        
+        self.trainer = trainer
+
     def _tie_or_clone_weights(self, first_module, second_module):
         """ Tie or clone module weights depending of weither we are using TorchScript or not
         """
@@ -43,20 +49,49 @@ class Seq2Seq(nn.Module):
             first_module.weight = nn.Parameter(second_module.weight.clone())
         else:
             first_module.weight = second_module.weight
-                  
+
     def tie_weights(self):
         """ Make sure we are sharing the input and output embeddings.
             Export to TorchScript can't handle parameter sharing so we are cloning them instead.
         """
-        self._tie_or_clone_weights(self.lm_head,
-                                   self.encoder.embeddings.word_embeddings)        
-        
-    def forward(self, source_ids=None,source_mask=None,target_ids=None,target_mask=None,args=None):   
+        if self.model_type == 'gpt-neo':
+            self._tie_or_clone_weights(self.lm_head,
+                                        self.encoder.wte)
+        else:
+            self._tie_or_clone_weights(self.lm_head,
+                                        self.encoder.embeddings.word_embeddings)
+
+    def gpt_neo_embeddings(self, target_ids):
+        input_shape = target_ids.size()
+        input_ids = target_ids.view(-1, input_shape[-1])
+        past_length = 0
+        past_key_values = tuple([None] * len(self.encoder.h))
+        position_ids = torch.arange(
+            past_length, input_shape[-1] + past_length, dtype=torch.long,
+            device=target_ids.device)
+        position_ids = position_ids.unsqueeze(0).view(-1, input_shape[-1])
+        inputs_embeds = self.encoder.wte(input_ids)
+        position_embeds = self.encoder.wpe(position_ids)
+        hidden_states = inputs_embeds + position_embeds
+        return self.encoder.drop(hidden_states)
+
+    def forward(self,
+                source_ids=None,
+                source_mask=None,
+                target_ids=None,
+                target_mask=None):
         outputs = self.encoder(source_ids, attention_mask=source_mask)
         encoder_output = outputs[0].permute([1,0,2]).contiguous()
-        if target_ids is not None:  
+        #if target_ids is not None:
+        if self.training:
             attn_mask=-1e4 *(1-self.bias[:target_ids.shape[1],:target_ids.shape[1]])
-            tgt_embeddings = self.encoder.embeddings(target_ids).permute([1,0,2]).contiguous()
+
+            if self.model_type == 'gpt-neo':
+                tgt_encoder_output = self.gpt_neo_embeddings(target_ids)
+            else:
+                tgt_encoder_output = self.encoder.embeddings(target_ids)
+
+            tgt_embeddings = tgt_encoder_output.permute([1,0,2]).contiguous()
             out = self.decoder(tgt_embeddings,encoder_output,tgt_mask=attn_mask,memory_key_padding_mask=(1-source_mask).bool())
             hidden_states = torch.tanh(self.dense(out)).permute([1,0,2]).contiguous()
             lm_logits = self.lm_head(hidden_states)
@@ -70,11 +105,16 @@ class Seq2Seq(nn.Module):
                             shift_labels.view(-1)[active_loss])
 
             outputs = loss,loss*active_loss.sum(),active_loss.sum()
+
+            if self.trainer:
+                outputs = transformers.modeling_outputs.Seq2SeqLMOutput(
+                    loss=loss,
+                    logits=lm_logits)
             return outputs
         else:
-            #Predict 
-            preds=[]       
-            zero=torch.cuda.LongTensor(1).fill_(0)     
+            #Predict
+            preds=[]
+            zero=torch.cuda.LongTensor(1).fill_(0)
             for i in range(source_ids.shape[0]):
                 context=encoder_output[:,i:i+1]
                 context_mask=source_mask[i:i+1,:]
@@ -82,11 +122,17 @@ class Seq2Seq(nn.Module):
                 input_ids=beam.getCurrentState()
                 context=context.repeat(1, self.beam_size,1)
                 context_mask=context_mask.repeat(self.beam_size,1)
-                for _ in range(self.max_length): 
+                for _ in range(self.max_length):
                     if beam.done():
                         break
                     attn_mask=-1e4 *(1-self.bias[:input_ids.shape[1],:input_ids.shape[1]])
-                    tgt_embeddings = self.encoder.embeddings(input_ids).permute([1,0,2]).contiguous()
+
+                    if self.model_type == 'gpt-neo':
+                        tgt_encoder_output = self.gpt_neo_embeddings(input_ids)
+                    else:
+                        tgt_encoder_output = self.encoder.embeddings(input_ids)
+
+                    tgt_embeddings = tgt_encoder_output.permute([1,0,2]).contiguous()
                     out = self.decoder(tgt_embeddings,context,tgt_mask=attn_mask,memory_key_padding_mask=(1-context_mask).bool())
                     out = torch.tanh(self.dense(out))
                     hidden_states=out.permute([1,0,2]).contiguous()[:,-1,:]
@@ -98,11 +144,15 @@ class Seq2Seq(nn.Module):
                 pred=beam.buildTargetTokens(hyp)[:self.beam_size]
                 pred=[torch.cat([x.view(-1) for x in p]+[zero]*(self.max_length-len(p))).view(1,-1) for p in pred]
                 preds.append(torch.cat(pred,0).unsqueeze(0))
-                
-            preds=torch.cat(preds,0)                
-            return preds   
-        
-        
+
+            preds=torch.cat(preds,0)
+            if self.trainer:
+                preds = transformers.modeling_outputs.Seq2SeqLMOutput(
+                    logits=out)
+
+            return preds
+
+
 
 class Beam(object):
     def __init__(self, size,sos,eos):
@@ -188,7 +238,7 @@ class Beam(object):
             for i in range(self.nextYs[-1].size(0)):
                 if self.nextYs[-1][i] != self._eos:
                     s = self.scores[i]
-                    unfinished.append((s, len(self.nextYs) - 1, i)) 
+                    unfinished.append((s, len(self.nextYs) - 1, i))
             unfinished.sort(key=lambda a: -a[0])
             self.finished+=unfinished[:self.size-len(self.finished)]
         return self.finished[:self.size]
@@ -205,7 +255,7 @@ class Beam(object):
                 k = self.prevKs[j][k]
             hyps.append(hyp[::-1])
         return hyps
-    
+
     def buildTargetTokens(self, preds):
         sentence=[]
         for pred in preds:
@@ -216,4 +266,3 @@ class Beam(object):
                 tokens.append(tok)
             sentence.append(tokens)
         return sentence
-        
