@@ -1,4 +1,5 @@
 pretrained_model=EleutherAI/gpt-neo-1.3B
+data_prefix=/scratch1/08401/ywen/data/c2c_data
 output_dir=gptneo-1.3B_8e-5 #the place where you want to save the fine-tuned models and predictions
 #output_dir=gptneo-1.3B_5e-4 #the place where you want to save the fine-tuned models and predictions
 #output_dir=gptneo-1.3B_5e-4 #the place where you want to save the fine-tuned models and predictions
@@ -14,12 +15,13 @@ output_dir=gptneo-1.3B_8e-5 #the place where you want to save the fine-tuned mod
 #deepspeed --include localhost:0,1,2,3 run_trainer.py \
 #deepspeed --include localhost:1,2,3 run_trainer.py \
 #CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 run_trainer.py \
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 run_trainer.py \
+#CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 run_trainer.py \
+deepspeed run_trainer.py \
 	--do_train \
 	--model_type gpt-neo \
 	--model_name_or_path $pretrained_model \
-	--train_filename /home/ewen/data/c2c_data/context_data.final,/home/ewen/data/c2c_data/body_data.final \
-	--dev_filename /home/ewen/data/c2c_data/context_data.final.100,/home/ewen/data/c2c_data/body_data.final.100 \
+	--train_filename ${data_prefix}/context_data.final,${data_prefix}/body_data.final \
+	--dev_filename ${data_prefix}/context_data.final.100,${data_prefix}/body_data.final.100 \
 	--output_dir $output_dir \
 	--max_source_length 512 \
 	--max_target_length 512 \
@@ -30,9 +32,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node
 	--eval_batch_size 1 \
 	--learning_rate 8e-5 \
 	--train_steps 400000 \
-	--eval_steps 1000
-    #--deepspeed deepspeed_config.json \
-    #--fp16 
+    --deepspeed deepspeed_config.json \
+    --fp16 \
+    --eval_steps 1000
 
 #output_dir=rohan-context-model-final-dropout #rohan-context-model-1 #the place where you want to save the fine-tuned models and predictions
 #CUDA_VISIBLE_DEVICES=1,2,3 python -m torch.distributed.launch --nproc_per_node=3 run.py \

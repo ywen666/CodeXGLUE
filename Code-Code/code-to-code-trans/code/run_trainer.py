@@ -29,6 +29,8 @@ from CustomTensorboardCallback import CustomTensorBoardCallback
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 
+logger = logging.getLogger(__name__)
+
 
 def read_examples(filename):
     """Read examples from filename."""
@@ -40,10 +42,10 @@ def read_examples(filename):
         for line1,line2 in zip(f1,f2):
             examples['source'].append(line1.strip()),
             examples['target'].append(line2.strip()),
-    #examples['source'] = examples['source'][:700000]
-    #examples['target'] = examples['target'][:700000]
     examples['source'] = examples['source'][:600000]
     examples['target'] = examples['target'][:600000]
+    #examples['source'] = examples['source'][:1000000]
+    #examples['target'] = examples['target'][:1000000]
     return examples
 
 
@@ -131,7 +133,7 @@ def main():
                         help="Linear warmup over warmup_steps.")
     parser.add_argument("--log_steps", default=10, type=int,
                         help="Log steps.")
-    parser.add_argument("--save_steps", default=500, type=int,
+    parser.add_argument("--save_steps", default=1000, type=int,
                         help="save steps.")
     parser.add_argument("--local_rank", type=int, default=-1,
                         help="For distributed training: local_rank")
@@ -139,6 +141,7 @@ def main():
                         help="random seed for initialization")
     parser.add_argument('--fp16', default=False, action='store_true')
     parser.add_argument('--deepspeed', default=None, type=str)
+    parser.add_argument('--report_to', default='tensorboard', type=str)
     # print arguments
     args = parser.parse_args()
 
@@ -161,10 +164,6 @@ def main():
                   beam_size=args.beam_size,max_length=args.max_target_length,
                   sos_id=tokenizer.cls_token_id,eos_id=tokenizer.sep_token_id,
                   model_type=args.model_type,trainer=True)
-
-    #if args.load_model_path is not None:
-    #    logger.info("reload model from {}".format(args.load_model_path))
-    #    model.load_state_dict(torch.load(args.load_model_path))
 
     training_args = transformers.Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
@@ -189,7 +188,7 @@ def main():
         logging_first_step=True,
         logging_steps=args.log_steps,
         save_steps=args.save_steps,
-        save_total_limit=20,
+        save_total_limit=50,
 
         dataloader_drop_last=True,
         dataloader_num_workers=3,
@@ -198,6 +197,7 @@ def main():
 
         generation_max_length=args.generation_max_length,
         deepspeed=args.deepspeed,
+        report_to=args.report_to,
         fp16=args.fp16,
     )
 

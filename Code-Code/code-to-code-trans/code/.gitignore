@@ -1,0 +1,9 @@
+*err
+*out
+saved_models/*
+*hostfile*
+wandb/
+tmp/*
+*.e*
+*.o*
+gptneo-1*/*
