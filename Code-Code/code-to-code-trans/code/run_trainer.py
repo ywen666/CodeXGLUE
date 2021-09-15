@@ -32,7 +32,7 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 logger = logging.getLogger(__name__)
 
 
-def read_examples(filename):
+def read_examples(filename, partition=0):
     """Read examples from filename."""
     examples = {'source': [], 'target': []}
     assert len(filename.split(','))==2
@@ -42,8 +42,14 @@ def read_examples(filename):
         for line1,line2 in zip(f1,f2):
             examples['source'].append(line1.strip()),
             examples['target'].append(line2.strip()),
-    examples['source'] = examples['source'][:600000]
-    examples['target'] = examples['target'][:600000]
+    start = partition * 600000
+    end = (partition + 1) * 600000 - 1
+    if end >= len(examples['source']):
+        end = len(examples['source']) - 1
+    examples['source'] = examples['source'][start:end]
+    examples['target'] = examples['target'][start:end]
+    #examples['source'] = examples['source'][:600000]
+    #examples['target'] = examples['target'][:600000]
     #examples['source'] = examples['source'][:1000000]
     #examples['target'] = examples['target'][:1000000]
     return examples
@@ -81,6 +87,8 @@ def main():
                         help="The dev filename. (source and target files).")
     parser.add_argument("--test_filename", default=None, type=str,
                         help="The test filename. (source and target files).")
+    parser.add_argument("--partition", default=0, type=int,
+                        help="Which partition of data for training.")
 
     parser.add_argument("--config_name", default="", type=str,
                         help="Pretrained config name or path if not the same as model_name")
@@ -164,6 +172,9 @@ def main():
                   beam_size=args.beam_size,max_length=args.max_target_length,
                   sos_id=tokenizer.cls_token_id,eos_id=tokenizer.sep_token_id,
                   model_type=args.model_type,trainer=True)
+    if args.load_model_path is not None:
+        state_dict = torch.load(args.load_model_path, map_location="cpu")
+        model.load_state_dict(state_dict)
 
     training_args = transformers.Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
@@ -208,8 +219,8 @@ def main():
     #train_dataset = JavaClassData(filename=args.train_filename)
     #eval_dataset = JavaClassData(filename=args.dev_filename)
     from datasets import Dataset
-    train_examples = read_examples(args.train_filename)
-    eval_examples = read_examples(args.dev_filename)
+    train_examples = read_examples(args.train_filename, partition=args.partition)
+    eval_examples = read_examples(args.dev_filename, partition=args.partition)
     train_dataset = Dataset.from_dict(train_examples)
     eval_dataset = Dataset.from_dict(eval_examples)
 
@@ -305,14 +316,11 @@ def main():
     )
     trainer.remove_callback(transformers.integrations.TensorBoardCallback)
     trainer.add_callback(CustomTensorBoardCallback())
-    if args.load_model_path is not None:
-        trainer.train(resume_from_checkpoint=args.load_model_path)
-    else:
-        trainer.train()
+    trainer.train()
 
     if args.local_rank == 0:
-        torch.save(model.state_dict(),
-                   os.path.join(args.output_dir, "final_checkpoint"))
+        torch.save(model.state_dcit(),
+                   os.path.join(args.output_dir, "final_checkpoint.pt"))
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-pretrained_model=EleutherAI/gpt-neo-1.3B
+pretrained_model=EleutherAI/gpt-neo-125M
 data_prefix=/scratch1/08401/ywen/data/c2c_data
 output_dir=gptneo-1.3B_8e-5 #the place where you want to save the fine-tuned models and predictions
 #output_dir=gptneo-1.3B_5e-4 #the place where you want to save the fine-tuned models and predictions
@@ -10,13 +10,12 @@ output_dir=gptneo-1.3B_8e-5 #the place where you want to save the fine-tuned mod
 #CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 run.py \
 #CUDA_VISIBLE_DEVICES=0 python run_trainer.py \
 #CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 run_trainer.py \
-#CUDA_VISIBLE_DEVICES=0 python run_trainer.py \
-#CUDA_VISIBLE_DEVICES=0 python run_trainer.py \
 #deepspeed --include localhost:0,1,2,3 run_trainer.py \
 #deepspeed --include localhost:1,2,3 run_trainer.py \
 #CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 run_trainer.py \
 #CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 run_trainer.py \
-deepspeed run_trainer.py \
+#deepspeed run_trainer.py \
+CUDA_VISIBLE_DEVICES=0 python run_trainer.py \
 	--do_train \
 	--model_type gpt-neo \
 	--model_name_or_path $pretrained_model \

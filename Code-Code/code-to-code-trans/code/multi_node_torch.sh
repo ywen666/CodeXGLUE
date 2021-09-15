@@ -4,13 +4,6 @@ export WANDB_PROJECT=gptneo
 export UCX_TLS=knem,dc_x,rc
 LOCAL_RANK=$PMI_RANK
 
-pretrained_model=EleutherAI/gpt-neo-1.3B
-data_prefix=/scratch1/08401/ywen/data/c2c_data
-#output_dir=gptneo-125M_8e-5_multinode #the place where you want to save the fine-tuned models and predictions
-output_dir=gptneo-125M_8e-5_fp32_slurmtest
-output_dir=gptneo-1.3B_8e-5_8nodes #the place where you want to save the fine-tuned models and predictions
-output_dir=gptneo-1.3B_8e-5_4nodes #the place where you want to save the fine-tuned models and predictions
-
 NGPUS=1
 NNODES=1
 MASTER=""
@@ -63,6 +56,15 @@ which python
 
 echo Launching torch.distributed: nproc_per_node=$NGPUS, nnodes=$NNODES, master_addr=$MASTER, local_rank=$LOCAL_RANK, using_mvapich=$MVAPICH
 
+data_prefix=/scratch1/08401/ywen/data/c2c_data
+#output_dir=gptneo-125M_8e-5_multinode #the place where you want to save the fine-tuned models and predictions
+#output_dir=gptneo-125M_8e-5_fp32
+#output_dir=gptneo-125M_8e-5_2node
+#output_dir=gptneo-1.3B_8e-5_4nodes
+output_dir=gptneo-1.3B_8e-5_12nodes_acc1
+pretrained_model=EleutherAI/gpt-neo-125M
+pretrained_model=EleutherAI/gpt-neo-1.3B
+
 python -m torch.distributed.launch \
     --nproc_per_node=$NGPUS \
     --nnodes=$NNODES \
@@ -86,6 +88,7 @@ python -m torch.distributed.launch \
 	--train_steps 400000 \
     --deepspeed deepspeed_config.json \
     --report_to wandb \
+    --partition 0 \
     --fp16
     #--load_model_path gptneo-125M_8e-5_fp32_slurmtest/checkpoint-4000
     #--eval_steps 1000 

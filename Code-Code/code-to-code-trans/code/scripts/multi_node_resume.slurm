@@ -5,15 +5,15 @@
 #
 #------------------------------------------------------------------------------
 
-#SBATCH -J GPTNEO_2nodes           # Job name
-#SBATCH -o gpt125M_2nodes.o%j            # Name of stdout output file
-#SBATCH -e gpt125M_2nodes.e%j            # Name of stdout output file
+#SBATCH -J GPTNEO_test           # Job name
+#SBATCH -o slurm_logs/test.o%j            # Name of stdout output file
+#SBATCH -e slurm_logs/test.e%j            # Name of stdout output file
 #SBATCH -N 2                            # Total # of nodes 
 #SBATCH -n 8                           # Total # of mpi tasks
-#SBATCH -t 48:00:00                     # Run time (hh:mm:ss)
+#SBATCH -t 2:00:00                     # Run time (hh:mm:ss)
 #SBATCH --mail-user=XXX                 # Email address
 #SBATCH --mail-type=end                 # Send email at begin and end of job
-#SBATCH -p rtx                          # Queue
+#SBATCH -p rtx-dev                          # Queue
 #SBATCH -A ASC21003                     # Allocation
 
 # Note mpiexec calls may need to be changed depending on MPI type
@@ -26,7 +26,8 @@ cat $HOSTFILE
 GPU_PER_NODE=4
 NODES=$(wc -l < $HOSTFILE)
 MASTER_NODE=$(head -n 1 $HOSTFILE)
+PARTITION=1
 
 mpiexec.hydra -f $HOSTFILE -np $NODES -ppn 1 \
-  ./multi_node_torch.sh \
-    --ngpus $GPU_PER_NODE --nnodes $NODES --master $MASTER_NODE
+  ./scripts/multi_node_resume.sh \
+    --ngpus $GPU_PER_NODE --nnodes $NODES --master $MASTER_NODE --partition $PARTITION
