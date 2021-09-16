@@ -62,33 +62,32 @@ data_prefix=/scratch1/08401/ywen/data/c2c_data
 #output_dir=gptneo-1.3B_8e-5_4nodes
 #pretrained_model=EleutherAI/gpt-neo-1.3B
 pretrained_model=EleutherAI/gpt-neo-125M
-output_dir=gptneo-125M_8e-5_fp32
-output_dir=gptneo-125M_8e-5_multinode_p${PARTITION}
+#output_dir=gptneo-125M_8e-5_fp32
+output_dir=gptneo-125M_8e-5_2node_acc4_p${PARTITION}
 echo $output_dir
 
-#python -m torch.distributed.launch \
-#    --nproc_per_node=$NGPUS \
-#    --nnodes=$NNODES \
-#    --node_rank=$LOCAL_RANK \
-#    --master_addr=$MASTER \
-#  run_trainer.py \
-#	--do_train \
-#	--model_type gpt-neo \
-#	--model_name_or_path $pretrained_model \
-#	--train_filename ${data_prefix}/context_data.final,${data_prefix}/body_data.final \
-#	--dev_filename ${data_prefix}/context_data.final.100,${data_prefix}/body_data.final.100 \
-#	--output_dir $output_dir \
-#	--max_source_length 512 \
-#	--max_target_length 512 \
-#    --warmup_steps 500 \
-#	--beam_size 5 \
-#	--train_batch_size 1 \
-#    --gradient_accumulation_steps 2 \
-#	--eval_batch_size 1 \
-#	--learning_rate 8e-5 \
-#	--train_steps 400000 \
-#    --deepspeed deepspeed_config.json \
-#    --report_to wandb \
-#    --partition 1 \
-#    --fp16 \
-#    --load_model_path gptneo-125M_8e-5_multinode/checkpoint-9000/pytorch_model.bin
+python -m torch.distributed.launch \
+    --nproc_per_node=$NGPUS \
+    --nnodes=$NNODES \
+    --node_rank=$LOCAL_RANK \
+    --master_addr=$MASTER \
+  run_trainer.py \
+	--do_train \
+	--model_type gpt-neo \
+	--model_name_or_path $pretrained_model \
+	--train_filename ${data_prefix}/context_data.final,${data_prefix}/body_data.final \
+	--dev_filename ${data_prefix}/context_data.final.100,${data_prefix}/body_data.final.100 \
+	--output_dir $output_dir \
+	--max_source_length 512 \
+	--max_target_length 512 \
+    --warmup_steps 500 \
+	--beam_size 5 \
+	--train_batch_size 1 \
+    --gradient_accumulation_steps 4 \
+	--learning_rate 8e-5 \
+	--train_steps 400000 \
+    --deepspeed deepspeed_config.json \
+    --report_to wandb \
+    --partition $PARTITION \
+    --fp16 \
+    --load_model_path gptneo-125M_8e-5_multinode/checkpoint-9000/pytorch_model.bin

@@ -42,28 +42,51 @@ def read_examples(filename, partition=0):
         for line1,line2 in zip(f1,f2):
             examples['source'].append(line1.strip()),
             examples['target'].append(line2.strip()),
-    start = partition * 600000
-    end = (partition + 1) * 600000 - 1
-    if end >= len(examples['source']):
-        end = len(examples['source']) - 1
-    examples['source'] = examples['source'][start:end]
-    examples['target'] = examples['target'][start:end]
-    #examples['source'] = examples['source'][:600000]
-    #examples['target'] = examples['target'][:600000]
-    #examples['source'] = examples['source'][:1000000]
-    #examples['target'] = examples['target'][:1000000]
     return examples
 
 
 class JavaClassData(torch.utils.data.Dataset):
-    def __init__(self, filename):
+    def __init__(self, filename, tokenizer, max_source_length=512):
+        self.tokenizer = tokenizer
+        self.max_source_length = max_source_length
+        self.max_target_length = max_source_length
         self.examples = read_examples(filename)
 
     def __len__(self):
-        return len(self.examples)
+        return min(len(self.examples['source']),
+                   len(self.examples['target']))
 
     def __getitem__(self, idx):
-        return self.examples[idx]
+        source_tokens = self.tokenizer.tokenize(
+            self.examples['source'][idx])[:self.max_source_length-2]
+        source_tokens =[self.tokenizer.cls_token] + \
+            source_tokens + [self.tokenizer.sep_token]
+        source_ids =  self.tokenizer.convert_tokens_to_ids(source_tokens)
+        source_mask = [1] * (len(source_tokens))
+        padding_length = self.max_source_length - len(source_ids)
+        source_ids += [self.tokenizer.pad_token_id]*padding_length
+        source_mask += [0]*padding_length
+
+        #if not training:
+        #    target_tokens = tokenizer.tokenize("None")
+        #else:
+        target_tokens = self.tokenizer.tokenize(
+            self.examples['target'][idx])[:self.max_target_length-2]
+
+        target_tokens = [self.tokenizer.cls_token] + \
+            target_tokens + [self.tokenizer.sep_token]
+        target_ids = self.tokenizer.convert_tokens_to_ids(target_tokens)
+        target_mask = [1] * len(target_ids)
+        padding_length = self.max_target_length - len(target_ids)
+        target_ids += [self.tokenizer.pad_token_id]*padding_length
+        target_mask += [0] * padding_length
+
+        model_inputs = {}
+        model_inputs['source_ids'] = source_ids
+        model_inputs['source_mask'] = source_mask
+        model_inputs['target_ids'] = target_ids
+        model_inputs['target_mask'] = target_mask
+        return model_inputs
 
 
 def main():
@@ -133,7 +156,7 @@ def main():
                         help="Total number of training epochs to perform.")
     parser.add_argument("--max_steps", default=-1, type=int,
                         help="If > 0: set total number of training steps to perform. Override num_train_epochs.")
-    parser.add_argument("--eval_steps", default=-1, type=int,
+    parser.add_argument("--eval_steps", default=1000, type=int,
                         help="")
     parser.add_argument("--train_steps", default=-1, type=int,
                         help="")
@@ -183,8 +206,9 @@ def main():
         do_train=True,
         do_eval=args.do_eval,
         #do_predict=True,
-        #evaluation_strategy='steps',
-        #eval_steps=args.eval_steps,
+        evaluation_strategy='steps',
+        eval_steps=args.eval_steps,
+        label_names=['target_ids'],
 
         num_train_epochs=args.num_train_epochs,
         per_device_train_batch_size=args.train_batch_size,
@@ -202,7 +226,7 @@ def main():
         save_total_limit=50,
 
         dataloader_drop_last=True,
-        dataloader_num_workers=3,
+        #dataloader_num_workers=3,
 
         local_rank=args.local_rank,
 
@@ -212,17 +236,23 @@ def main():
         fp16=args.fp16,
     )
 
+    train_dataset = JavaClassData(
+        filename=args.train_filename,
+        tokenizer=tokenizer)
+    eval_dataset = JavaClassData(
+        filename=args.dev_filename,
+        tokenizer=tokenizer)
     #train_dataset = JavaClassData(training=True)
     #eval_dataset = JavaClassData(training=False,
     #                             tokenizer=tokenizer,
     #                             args=args)
     #train_dataset = JavaClassData(filename=args.train_filename)
     #eval_dataset = JavaClassData(filename=args.dev_filename)
-    from datasets import Dataset
-    train_examples = read_examples(args.train_filename, partition=args.partition)
-    eval_examples = read_examples(args.dev_filename, partition=args.partition)
-    train_dataset = Dataset.from_dict(train_examples)
-    eval_dataset = Dataset.from_dict(eval_examples)
+    #from datasets import Dataset
+    #train_examples = read_examples(args.train_filename, partition=args.partition)
+    #eval_examples = read_examples(args.dev_filename, partition=args.partition)
+    #train_dataset = Dataset.from_dict(train_examples)
+    #eval_dataset = Dataset.from_dict(eval_examples)
 
     def preprocess_function_batched(examples, training=True):
         inputs = [tokenizer.cls_token + ex + tokenizer.cls_token for ex in examples['source']]
@@ -282,31 +312,31 @@ def main():
         model_inputs['target_mask'] = target_mask
         return model_inputs
 
-    import functools
+    #import functools
     #train_preprocess_fn = functools.partial(preprocess_function_batched,
     #                                        training=True)
     #eval_preprocess_fn = functools.partial(preprocess_function_batched,
     #                                       training=False)
-    train_preprocess_fn = functools.partial(preprocess_function,
-                                            training=True)
-    eval_preprocess_fn = functools.partial(preprocess_function,
-                                           training=False)
+    #train_preprocess_fn = functools.partial(preprocess_function,
+    #                                        training=True)
+    #eval_preprocess_fn = functools.partial(preprocess_function,
+    #                                       training=False)
 
-    with training_args.main_process_first(desc="train dataset map pre-processing"):
-        train_dataset = train_dataset.map(
-            train_preprocess_fn,
-            #batched=True,
-            num_proc=16,
-            desc="Running tokenizer on train dataset",
-        )
+    #with training_args.main_process_first(desc="train dataset map pre-processing"):
+    #    train_dataset = train_dataset.map(
+    #        train_preprocess_fn,
+    #        batched=True,
+    #        num_proc=10,
+    #        desc="Running tokenizer on train dataset",
+    #    )
 
-    with training_args.main_process_first(desc="eval dataset map pre-processing"):
-        eval_dataset = eval_dataset.map(
-            eval_preprocess_fn,
-            #batched=True,
-            num_proc=8,
-            desc="Running tokenizer on validation dataset",
-        )
+    #with training_args.main_process_first(desc="eval dataset map pre-processing"):
+    #    eval_dataset = eval_dataset.map(
+    #        eval_preprocess_fn,
+    #        batched=True,
+    #        num_proc=8,
+    #        desc="Running tokenizer on validation dataset",
+    #    )
 
     trainer = transformers.Seq2SeqTrainer(
         model=model,

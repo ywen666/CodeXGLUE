@@ -57,15 +57,9 @@ which python
 echo Launching torch.distributed: nproc_per_node=$NGPUS, nnodes=$NNODES, master_addr=$MASTER, local_rank=$LOCAL_RANK, using_mvapich=$MVAPICH
 
 data_prefix=/scratch1/08401/ywen/data/c2c_data
-#output_dir=gptneo-125M_8e-5_multinode #the place where you want to save the fine-tuned models and predictions
-#output_dir=gptneo-125M_8e-5_fp32
-#output_dir=gptneo-125M_8e-5_2node
-#output_dir=gptneo-1.3B_8e-5_4nodes
-output_dir=gptneo-1.3B_8e-5_16nodes_acc1_wd1e-4
+output_dir=gptneo-125M_8e-5_4nodes_acc2_wd001
 pretrained_model=EleutherAI/gpt-neo-125M
-pretrained_model=EleutherAI/gpt-neo-1.3B
-GRAD_ACC=1
-WEIGHT_DECAY=1e-4
+GRAD_ACC=2
 
 python -m torch.distributed.launch \
     --nproc_per_node=$NGPUS \
@@ -82,14 +76,14 @@ python -m torch.distributed.launch \
 	--max_source_length 512 \
 	--max_target_length 512 \
     --num_train_epochs 2 \
-    --warmup_steps 2000 \
+    --warmup_steps 1500 \
 	--beam_size 5 \
 	--train_batch_size 1 \
     --gradient_accumulation_steps $GRAD_ACC \
 	--eval_batch_size 1 \
 	--learning_rate 8e-5 \
 	--train_steps 400000 \
-    --weight_decay $WEIGHT_DECAY \
+    --weight_decay 0.01 \
     --deepspeed deepspeed_config.json \
     --report_to wandb \
     --do_eval \

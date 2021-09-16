@@ -5,15 +5,15 @@
 #
 #------------------------------------------------------------------------------
 
-#SBATCH -J GPTNEO_test           # Job name
-#SBATCH -o slurm_logs/test.o%j            # Name of stdout output file
-#SBATCH -e slurm_logs/test.e%j            # Name of stdout output file
+#SBATCH -J GPTNEO_resume           # Job name
+#SBATCH -o slurm_logs/gpt125M_2nodeacc4_p1.o%j            # Name of stdout output file
+#SBATCH -e slurm_logs/gpt125M_2nodeacc4_p1.e%j            # Name of stdout output file
 #SBATCH -N 2                            # Total # of nodes 
 #SBATCH -n 8                           # Total # of mpi tasks
-#SBATCH -t 2:00:00                     # Run time (hh:mm:ss)
+#SBATCH -t 48:00:00                     # Run time (hh:mm:ss)
 #SBATCH --mail-user=XXX                 # Email address
 #SBATCH --mail-type=end                 # Send email at begin and end of job
-#SBATCH -p rtx-dev                          # Queue
+#SBATCH -p rtx                          # Queue
 #SBATCH -A ASC21003                     # Allocation
 
 # Note mpiexec calls may need to be changed depending on MPI type

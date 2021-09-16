@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Run with mpiexec.hydra -f hostfile -np 4 -ppn 1 ./run_multinode_trainer.sh > multi_4nodes.out 2> multi_4nodes.err
+# Run with mpiexec.hydra -f $HOSTFILE -np 4 -ppn 1 ./run_multinode_trainer.sh > multi_4nodes.out 2> multi_4nodes.err
 HOSTFILE=~/hostfolder/${SLURM_NODELIST}_hostfile
 scontrol show hostnames $SLURM_NODELIST > $HOSTFILE
 cat $HOSTFILE
@@ -34,11 +34,15 @@ MASTER_NODE=$(head -n 1 $HOSTFILE)
 LOCAL_RANK=$PMI_RANK
 
 pretrained_model=EleutherAI/gpt-neo-1.3B
-#pretrained_model=EleutherAI/gpt-neo-125M
+pretrained_model=EleutherAI/gpt-neo-125M
 data_prefix=/scratch1/08401/ywen/data/c2c_data
 output_dir=gptneo-125M_8e-5_p1_test
 output_dir=gptneo-1.3B_8e-5_4node
 output_dir=gptneo-1.3B_8e-5_12node_gradacc1_p0
+output_dir=test_wholedata
+PARTITION=10
+GRAD_ACC=2
+
 python -m torch.distributed.launch \
     --nproc_per_node=$GPU_PER_NODE \
     --nnodes=$NODES \
@@ -56,14 +60,16 @@ python -m torch.distributed.launch \
     --warmup_steps 1000 \
 	--beam_size 5 \
 	--train_batch_size 1 \
-    --gradient_accumulation_steps 1 \
+    --gradient_accumulation_steps $GRAD_ACC \
 	--eval_batch_size 1 \
 	--learning_rate 8e-5 \
 	--train_steps 400000 \
     --num_train_epochs 1 \
     --deepspeed deepspeed_config.json \
     --report_to wandb \
-    --partition 0 \
+    --partition $PARTITION \
+    --do_eval \
+    --eval_steps 10 \
     --fp16 
     #--load_model_path gptneo-125M_8e-5_multinode/checkpoint-9000/pytorch_model.bin \
 

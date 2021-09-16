@@ -5,11 +5,11 @@
 #
 #------------------------------------------------------------------------------
 
-#SBATCH -J GPTNEO_2nodes           # Job name
-#SBATCH -o gpt125M_2nodes.o%j            # Name of stdout output file
-#SBATCH -e gpt125M_2nodes.e%j            # Name of stdout output file
-#SBATCH -N 2                            # Total # of nodes 
-#SBATCH -n 8                           # Total # of mpi tasks
+#SBATCH -J GPTNEO_16nodes           # Job name
+#SBATCH -o slurm_logs/gpt1.3B_16nodes_8e-5_wd1e-4.o%j            # Name of stdout output file
+#SBATCH -e slurm_logs/gpt1.3B_16nodes_8e-5_wd1e-4.e%j            # Name of stdout output file
+#SBATCH -N 16                            # Total # of nodes 
+#SBATCH -n 64                           # Total # of mpi tasks
 #SBATCH -t 48:00:00                     # Run time (hh:mm:ss)
 #SBATCH --mail-user=XXX                 # Email address
 #SBATCH --mail-type=end                 # Send email at begin and end of job
