@@ -1,48 +1,25 @@
 from __future__ import absolute_import
 import os
 import sys
-import pickle
-import torch
-import json
-import random
 import logging
 import argparse
-import numpy as np
-from io import open
-from itertools import cycle
+
+import torch
 import torch.nn as nn
 from model import Seq2Seq
-from tqdm import trange
-from tqdm.auto import tqdm
+from CustomTensorboardCallback import CustomTensorBoardCallback
 
-from bleu import _bleu
-from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
-from torch.utils.data.distributed import DistributedSampler
+import transformers
 from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup,
                           RobertaConfig, RobertaModel, RobertaTokenizer,
                           GPTNeoConfig, GPTNeoModel, GPT2Tokenizer)
 MODEL_CLASSES = {'roberta': (RobertaConfig, RobertaModel, RobertaTokenizer),
                  'gpt-neo': (GPTNeoConfig, GPTNeoModel, GPT2Tokenizer)}
 
-import transformers
-from CustomTensorboardCallback import CustomTensorBoardCallback
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 logger = logging.getLogger(__name__)
-
-
-def read_examples(filename, partition=0):
-    """Read examples from filename."""
-    examples = {'source': [], 'target': []}
-    assert len(filename.split(','))==2
-    src_filename = filename.split(',')[0]
-    trg_filename = filename.split(',')[1]
-    with open(src_filename) as f1,open(trg_filename) as f2:
-        for line1,line2 in zip(f1,f2):
-            examples['source'].append(line1.strip()),
-            examples['target'].append(line2.strip()),
-    return examples
 
 
 class JavaClassData(torch.utils.data.Dataset):
@@ -242,101 +219,6 @@ def main():
     eval_dataset = JavaClassData(
         filename=args.dev_filename,
         tokenizer=tokenizer)
-    #train_dataset = JavaClassData(training=True)
-    #eval_dataset = JavaClassData(training=False,
-    #                             tokenizer=tokenizer,
-    #                             args=args)
-    #train_dataset = JavaClassData(filename=args.train_filename)
-    #eval_dataset = JavaClassData(filename=args.dev_filename)
-    #from datasets import Dataset
-    #train_examples = read_examples(args.train_filename, partition=args.partition)
-    #eval_examples = read_examples(args.dev_filename, partition=args.partition)
-    #train_dataset = Dataset.from_dict(train_examples)
-    #eval_dataset = Dataset.from_dict(eval_examples)
-
-    def preprocess_function_batched(examples, training=True):
-        inputs = [tokenizer.cls_token + ex + tokenizer.cls_token for ex in examples['source']]
-
-        input_encodings = tokenizer(inputs,
-                                    max_length=args.max_source_length,
-                                    padding='max_length',
-                                    truncation=True)
-        source_ids = input_encodings['input_ids']
-        source_mask = input_encodings['attention_mask']
-
-        targets = [tokenizer.cls_token + ex + tokenizer.sep_token for ex in examples['target']]
-        #if training:
-        #    targets = [tokenizer.cls_token + ex + tokenizer.sep_token for ex in examples['target']]
-        #else:
-        #    targets = ['None' for ex in examples]
-
-        target_encodings = tokenizer(targets,
-                                     max_length=args.max_source_length,
-                                     padding='max_length',
-                                     truncation=True)
-        target_ids = target_encodings['input_ids']
-        target_mask = target_encodings['attention_mask']
-
-        model_inputs = {}
-        model_inputs['source_ids'] = source_ids
-        model_inputs['source_mask'] = source_mask
-        model_inputs['target_ids'] = target_ids
-        model_inputs['target_mask'] = target_mask
-        return model_inputs
-
-    def preprocess_function(example, training=True):
-        source_tokens = tokenizer.tokenize(example['source'])[:args.max_source_length-2]
-        source_tokens =[tokenizer.cls_token]+source_tokens+[tokenizer.sep_token]
-        source_ids =  tokenizer.convert_tokens_to_ids(source_tokens)
-        source_mask = [1] * (len(source_tokens))
-        padding_length = args.max_source_length - len(source_ids)
-        source_ids+=[tokenizer.pad_token_id]*padding_length
-        source_mask+=[0]*padding_length
-
-        #if not training:
-        #    target_tokens = tokenizer.tokenize("None")
-        #else:
-        target_tokens = tokenizer.tokenize(example['target'])[:args.max_target_length-2]
-
-        target_tokens = [tokenizer.cls_token]+target_tokens+[tokenizer.sep_token]
-        target_ids = tokenizer.convert_tokens_to_ids(target_tokens)
-        target_mask = [1] *len(target_ids)
-        padding_length = args.max_target_length - len(target_ids)
-        target_ids+=[tokenizer.pad_token_id]*padding_length
-        target_mask+=[0]*padding_length
-
-        model_inputs = {}
-        model_inputs['source_ids'] = source_ids
-        model_inputs['source_mask'] = source_mask
-        model_inputs['target_ids'] = target_ids
-        model_inputs['target_mask'] = target_mask
-        return model_inputs
-
-    #import functools
-    #train_preprocess_fn = functools.partial(preprocess_function_batched,
-    #                                        training=True)
-    #eval_preprocess_fn = functools.partial(preprocess_function_batched,
-    #                                       training=False)
-    #train_preprocess_fn = functools.partial(preprocess_function,
-    #                                        training=True)
-    #eval_preprocess_fn = functools.partial(preprocess_function,
-    #                                       training=False)
-
-    #with training_args.main_process_first(desc="train dataset map pre-processing"):
-    #    train_dataset = train_dataset.map(
-    #        train_preprocess_fn,
-    #        batched=True,
-    #        num_proc=10,
-    #        desc="Running tokenizer on train dataset",
-    #    )
-
-    #with training_args.main_process_first(desc="eval dataset map pre-processing"):
-    #    eval_dataset = eval_dataset.map(
-    #        eval_preprocess_fn,
-    #        batched=True,
-    #        num_proc=8,
-    #        desc="Running tokenizer on validation dataset",
-    #    )
 
     trainer = transformers.Seq2SeqTrainer(
         model=model,

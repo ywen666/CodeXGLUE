@@ -7,3 +7,5 @@ tmp/*
 *.e*
 *.o*
 gptneo-1*/*
+tacc_inference
+outdated_data_preprocessing_code.py
