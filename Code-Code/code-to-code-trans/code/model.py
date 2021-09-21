@@ -265,3 +265,122 @@ class Beam(object):
                 tokens.append(tok)
             sentence.append(tokens)
         return sentence
+
+
+class Seq2SeqPretrained(transformers.PreTrainedModel):
+    def __init__(self, encoder,decoder,config,beam_size=None,max_length=None,
+                 tokenizer=None,model_type=None,trainer=False):
+        #decoder_config = {
+        #    'return_dict': False,
+        #    'pad_token_id': tokenizer.pad_token_id,
+        #    'sep_token_id': tokenizer.sep_token_id,
+        #    'eos_token_id': tokenizer.eos_token_id,
+        #    'bos_token_id': encoder.config.bos_token_id,
+        #    'hidden_size': encoder.config.hidden_size,
+        #    'num_heads': encoder.config.num_heads,
+        #    'num_layers': 6,
+        #    'vocab_size': encoder.config.vocab_size
+        #}
+        #decoder_config = transformers.PretrainedConfig(**decoder_config)
+        #setattr(decoder, 'config', decoder_config)
+        super(Seq2SeqPretrained, self).__init__(encoder.config)
+        self.config = config
+        self.encoder = encoder
+        self.decoder = decoder
+        self.register_buffer("bias", torch.tril(torch.ones(2048, 2048)))
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.lsm = nn.LogSoftmax(dim=-1)
+        self.model_type=model_type
+        self.tie_weights()
+
+        self.beam_size=1
+        self.max_length=max_length
+        self.sos_id=tokenizer.cls_token_id
+        self.eos_id=tokenizer.eos_token_id
+
+    def _tie_or_clone_weights(self, first_module, second_module):
+        """ Tie or clone module weights depending of weither we are using TorchScript or not
+        """
+        if self.config.torchscript:
+            first_module.weight = nn.Parameter(second_module.weight.clone())
+        else:
+            first_module.weight = second_module.weight
+
+    def tie_weights(self):
+        """ Make sure we are sharing the input and output embeddings.
+            Export to TorchScript can't handle parameter sharing so we are cloning them instead.
+        """
+        self._tie_or_clone_weights(self.lm_head,
+                                    self.encoder.wte)
+
+    def gpt_neo_embeddings(self, target_ids):
+        input_shape = target_ids.size()
+        input_ids = target_ids.view(-1, input_shape[-1])
+        past_length = 0
+        past_key_values = tuple([None] * len(self.encoder.h))
+        position_ids = torch.arange(
+            past_length, input_shape[-1] + past_length, dtype=torch.long,
+            device=target_ids.device)
+        position_ids = position_ids.unsqueeze(0).view(-1, input_shape[-1])
+        inputs_embeds = self.encoder.wte(input_ids)
+        position_embeds = self.encoder.wpe(position_ids)
+        hidden_states = inputs_embeds + position_embeds
+        return self.encoder.drop(hidden_states)
+
+    def forward(self,
+                source_ids=None,
+                source_mask=None,
+                target_ids=None,
+                target_mask=None,
+                encoder_outputs=None,
+                **model_kargs):
+        if target_ids is not None:
+            outputs = self.encoder(source_ids, attention_mask=source_mask)
+            encoder_output = outputs[0].permute([1,0,2]).contiguous()
+            attn_mask=-1e4 *(1-self.bias[:target_ids.shape[1],:target_ids.shape[1]])
+
+            tgt_encoder_output = self.gpt_neo_embeddings(target_ids)
+            tgt_embeddings = tgt_encoder_output.permute([1,0,2]).contiguous()
+            out = self.decoder(tgt_embeddings,encoder_output,tgt_mask=attn_mask,memory_key_padding_mask=(1-source_mask).bool())
+            hidden_states = torch.tanh(self.dense(out)).permute([1,0,2]).contiguous()
+            lm_logits = self.lm_head(hidden_states)
+            # Shift so that tokens < n predict n
+            active_loss = target_mask[..., 1:].ne(0).view(-1) == 1
+            shift_logits = lm_logits[..., :-1, :].contiguous()
+            shift_labels = target_ids[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-1)
+            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1))[active_loss],
+                            shift_labels.view(-1)[active_loss])
+
+            outputs = transformers.modeling_outputs.Seq2SeqLMOutput(
+                loss=loss,
+                logits=lm_logits)
+            return outputs
+        else:
+            encoder_output = encoder_outputs[0].permute([1,0,2]).contiguous()
+            input_ids = model_kargs['input_ids']
+            attn_mask=-1e4 *(1-self.bias[:input_ids.shape[1],:input_ids.shape[1]])
+            tgt_encoder_output = self.gpt_neo_embeddings(input_ids)
+            tgt_embeddings = tgt_encoder_output.permute([1,0,2]).contiguous()
+            out = self.decoder(tgt_embeddings,
+                               encoder_output,
+                               tgt_mask=attn_mask,
+                               memory_key_padding_mask=(1-source_mask).bool())
+            out = torch.tanh(self.dense(out))
+            hidden_states=out.permute([1,0,2]).contiguous()
+            logits = self.lm_head(hidden_states)
+
+            return transformers.modeling_outputs.Seq2SeqLMOutput(logits=logits)
+
+    def get_encoder(self):
+        return self.encoder
+
+    def get_decoder(self):
+        return self.decoder
+
+    def prepare_inputs_for_generation(self, input_ids, **kargs):
+        return {"input_ids": input_ids,
+                "encoder_outputs": kargs['encoder_outputs'],
+                "source_mask": kargs['source_mask']}

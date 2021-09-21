@@ -261,6 +261,7 @@ def main():
                         help="For distributed training: local_rank")
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed for initialization")
+    parser.add_argument('--fp16', default=False, action='store_true')
     # print arguments
     args = parser.parse_args()
     logger.setLevel(logging.INFO if args.local_rank in [-1, 0] else logging.ERROR)
@@ -304,6 +305,8 @@ def main():
                   beam_size=args.beam_size,max_length=args.max_target_length,
                   sos_id=tokenizer.cls_token_id,eos_id=tokenizer.sep_token_id,
                   model_type=args.model_type)
+    if args.do_test and args.fp16:
+        model.half()
 
     if args.load_model_path is not None:
         logger.info("reload model from {}".format(args.load_model_path))
@@ -604,5 +607,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
