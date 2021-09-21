@@ -259,3 +259,224 @@ class lineDataset(Dataset):
 
     def __getitem__(self, item):
         return torch.tensor(self.inputs[item]), self.gts[item]
+
+
+class Example(object):
+    """A single training/test example."""
+    def __init__(self,
+                 idx,
+                 source,
+                 target,
+                 ):
+        self.idx = idx
+        self.source = source
+        self.target = target
+
+def read_examples(filename):
+    """Read examples from filename."""
+    examples=[]
+    assert len(filename.split(','))==2
+    src_filename = filename.split(',')[0]
+    trg_filename = filename.split(',')[1]
+    idx = 0
+    with open(src_filename) as f1,open(trg_filename) as f2:
+            for line1,line2 in zip(f1,f2):
+                examples.append(
+                Example(
+                        idx = idx,
+                        source=line1.strip(),
+                        target=line2.strip(),
+                        )
+                )
+                idx+=1
+    return examples
+
+class InputFeatures(object):
+    """A single training/test features for a example."""
+    def __init__(self,
+                 example_id,
+                 source_ids,
+                 target_ids,
+                 source_mask,
+                 target_mask,
+
+    ):
+        self.example_id = example_id
+        self.source_ids = source_ids
+        self.target_ids = target_ids
+        self.source_mask = source_mask
+        self.target_mask = target_mask
+
+def convert_examples_to_features(examples, tokenizer, args, logger, stage=None):
+    features = []
+    for example_index, example in enumerate(examples):
+        #source
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        #    tokenizer.add_special_tokens({
+        #        'pad_token': '<pad>',
+        #        'cls_token': '<s>',
+        #        'sep_token': '</s>'
+        #    })
+        #source_tokens = tokenizer.tokenize(example.source)[:args.max_source_length-2]
+        #source_tokens =[tokenizer.cls_token]+source_tokens+[tokenizer.sep_token]
+        source_tokens = tokenizer.tokenize(example.source)[:args.block_size]
+
+        source_ids =  tokenizer.convert_tokens_to_ids(source_tokens)
+        source_mask = [1] * (len(source_tokens))
+        padding_length = args.block_size - len(source_ids)
+
+        source_ids+=[tokenizer.pad_token_id]*padding_length
+        source_mask+=[0]*padding_length
+
+        #target
+        if stage=="test":
+            target_tokens = tokenizer.tokenize("None")
+        else:
+            #target_tokens = tokenizer.tokenize(example.target)[:args.max_target_length-2]
+            target_tokens = tokenizer.tokenize(example.target)[:args.block_size]
+
+        #target_tokens = [tokenizer.cls_token]+target_tokens+[tokenizer.sep_token]
+        target_tokens = target_tokens
+
+        target_ids = tokenizer.convert_tokens_to_ids(target_tokens)
+        target_mask = [1] *len(target_ids)
+        padding_length = args.block_size - len(target_ids)
+        target_ids+=[tokenizer.pad_token_id]*padding_length
+        target_mask+=[0]*padding_length
+
+        if example_index < 5:
+            if stage=='train':
+                logger.info("*** Example ***")
+                logger.info("idx: {}".format(example.idx))
+
+                logger.info("source_tokens: {}".format([x.replace('\u0120','_') for x in source_tokens]))
+                logger.info("source_ids: {}".format(' '.join(map(str, source_ids))))
+                logger.info("source_mask: {}".format(' '.join(map(str, source_mask))))
+
+                logger.info("target_tokens: {}".format([x.replace('\u0120','_') for x in target_tokens]))
+                logger.info("target_ids: {}".format(' '.join(map(str, target_ids))))
+                logger.info("target_mask: {}".format(' '.join(map(str, target_mask))))
+
+        features.append(
+            InputFeatures(
+                 example_index,
+                 source_ids,
+                 target_ids,
+                 source_mask,
+                 target_mask,
+            )
+        )
+    return features
+
+
+class JavafinetuneDataset(torch.utils.data.Dataset):
+    def __init__(self, tokenizer, filename, file_type='train', max_length=512):
+        self.max_length = max_length 
+        self.tokenizer = tokenizer
+        self.examples = self.read_examples(filename)
+
+    def read_examples(self, filename):
+        """Read examples from filename."""
+        examples = {'source': [], 'target': []}
+        assert len(filename.split(','))==2
+        src_filename = filename.split(',')[0]
+        trg_filename = filename.split(',')[1]
+        with open(src_filename) as f1,open(trg_filename) as f2:
+            for line1,line2 in zip(f1,f2):
+                examples['source'].append(line1.strip()),
+                examples['target'].append(line2.strip()),
+        return examples
+
+    def pack_samples(self, idx):
+        """
+        Repeatedly pick question, answer pairs from self.dataroot until we hit max_tokens.
+        This will not include the tokens for the QUESTION and ANSWER prompt, as well as the  
+        self.question_prefix. These will be added later and the total input will be 
+        truncated if necessary.
+        Always include the sample at idx at the beginning.
+        """
+        curr_num_tokens = 0
+        curr_samples = [] 
+
+        curr_q, curr_a = self.examples['source'][idx], self.examples['target'][idx]
+        while curr_num_tokens < self.max_length:
+
+            # Never remove. Fixes stalling bug.
+            curr_q = curr_q[:150000]
+            curr_a = curr_a[:150000]
+
+            curr_num_tokens += len(self.tokenizer.tokenize(curr_q))
+            curr_num_tokens += len(self.tokenizer.tokenize(curr_a))
+
+            curr_samples.append((curr_q, curr_a))
+
+            random_idx = random.choice(range(len(self.examples['target'])))
+            curr_q = self.examples['source'][random_idx]
+            curr_a = self.examples['target'][random_idx] 
+
+        return curr_samples
+
+    def __len__(self):
+        return min(len(self.examples['source']),
+                   len(self.examples['target']))
+
+    def __getitem__(self, idx):
+        input_ids = []
+        label_ids = []
+
+        raw_samples = self.pack_samples(idx)
+        for q_str, a_str in raw_samples: 
+            q_str = self.tokenizer.cls_token + self.examples['source'][idx] + \
+                self.tokenizer.sep_token
+            a_str = self.examples['target'][idx]
+            question_token_ids = self.tokenizer.encode(q_str, verbose=False)
+            answer_token_ids   = self.tokenizer.encode(a_str, verbose=False)
+            answer_token_ids.append(self.tokenizer.eos_token_id)
+            input_ids.extend(question_token_ids)
+            input_ids.extend(answer_token_ids)
+            label_ids.extend([-100] * len(question_token_ids))
+            label_ids.extend(answer_token_ids)
+
+        # Cut off the excess
+        input_ids = input_ids[:self.max_length]
+        label_ids = label_ids[:self.max_length]
+
+        retval = {
+            "input_ids" : torch.LongTensor(input_ids),
+            "labels" :  torch.LongTensor(label_ids)
+        }
+        gc.collect()
+        return retval
+
+
+if __name__ == '__main__':
+    import argparse
+    import transformers
+
+    parser = argparse.ArgumentParser()
+    args = parser.parse_args()
+
+    data_prefix='/scratch1/08401/ywen/data/c2c_data'
+    args.trainfile='{}/context_data.final,{}/body_data.final'.format(data_prefix, data_prefix)
+    args.devfile='{}/context_data.final.100,{}/body_data.final.100'.format(data_prefix, data_prefix)
+    args.output_dir = 'save/c2c_data_gptneo'
+    tokenizer = transformers.GPT2Tokenizer.from_pretrained(
+        'EleutherAI/gpt-neo-125M',
+        do_lower_case=False,
+        sep_token='</s>', cls_token='<s>',
+        pad_token='<pad>', unk_token='<|UNKNOWN|>')
+    dataset = JavafinetuneDataset(tokenizer, args.devfile, max_length=512)
+    #dev_dataset = JavafinetuneDataset(tokenizer, args, logger, file_type='dev', block_size=1024)
+
+    e = dataset[0]
+    print(e)
+    print("------- input_ids ------------------------------------------------------------------------------------")
+    print(tokenizer.decode(e['input_ids']))
+    print("------- labels ------------------------------------------------------------------------------------")
+    labels = e['labels']
+    labels[labels == -100] = tokenizer.eos_token_id
+    labels_str = tokenizer.decode(labels)
+    print(labels_str)
+
+    import pdb; pdb.set_trace()
