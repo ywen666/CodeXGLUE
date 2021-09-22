@@ -16,9 +16,10 @@ echo $MASTER_NODE
 LANG=java   
 data_prefix=/scratch1/08401/ywen/data/c2c_data
 LITFILE=../dataset/javaCorpus/literals.json
-OUTPUTDIR=save/gptneo-125M_8e-5_4nodes_acc2_wd1e-4
+OUTPUTDIR=save/gptneo-125M_8e-5_4nodes_acc2_wd1e-2
 PRETRAINDIR=EleutherAI/gpt-neo-125M
 LOGFILE=${OUTPUTDIR}/trainer.log
+WEIGHT_DECAY=1e-2
 GRAD_ACC=2
 python -m torch.distributed.launch \
     --nproc_per_node=$NGPUS \
@@ -40,7 +41,7 @@ python -m torch.distributed.launch \
     --do_train \
     --do_eval \
     --learning_rate=8e-5 \
-    --weight_decay=1e-4 \
+    --weight_decay=$WEIGHT_DECAY \
     --per_gpu_train_batch_size=1 \
     --per_gpu_eval_batch_size=1 \
     --num_train_epochs=1 \

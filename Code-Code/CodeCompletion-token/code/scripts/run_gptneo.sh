@@ -1,5 +1,4 @@
 LANG=java                       # set python for py150
-DATADIR=/home/ewen/data/c2c_data
 data_prefix=/scratch1/08401/ywen/data/c2c_data
 LITFILE=../dataset/javaCorpus/literals.json
 OUTPUTDIR=save/gptneo-125M_garbage
@@ -30,6 +29,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node
         --num_train_epochs=1 \
         --logging_steps=50 \
         --save_steps=2000 \
+        --eval_steps=20 \
         --seed=666
         #--deepspeed=deepspeed_config.json \
         #--fp16

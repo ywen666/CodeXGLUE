@@ -371,10 +371,11 @@ def convert_examples_to_features(examples, tokenizer, args, logger, stage=None):
 
 
 class JavafinetuneDataset(torch.utils.data.Dataset):
-    def __init__(self, tokenizer, filename, file_type='train', max_length=512):
+    def __init__(self, tokenizer, filename, max_length=512, test=False):
         self.max_length = max_length 
         self.tokenizer = tokenizer
         self.examples = self.read_examples(filename)
+        self.test = test
 
     def read_examples(self, filename):
         """Read examples from filename."""
@@ -398,8 +399,12 @@ class JavafinetuneDataset(torch.utils.data.Dataset):
         """
         curr_num_tokens = 0
         curr_samples = [] 
-
         curr_q, curr_a = self.examples['source'][idx], self.examples['target'][idx]
+
+        if self.test:
+            curr_samples.append((curr_q, curr_a))
+            return curr_samples
+
         while curr_num_tokens < self.max_length:
 
             # Never remove. Fixes stalling bug.
@@ -431,23 +436,31 @@ class JavafinetuneDataset(torch.utils.data.Dataset):
                 self.tokenizer.sep_token
             a_str = self.examples['target'][idx]
             question_token_ids = self.tokenizer.encode(q_str, verbose=False)
-            answer_token_ids   = self.tokenizer.encode(a_str, verbose=False)
+            answer_token_ids = self.tokenizer.encode(a_str, verbose=False)
             answer_token_ids.append(self.tokenizer.eos_token_id)
             input_ids.extend(question_token_ids)
             input_ids.extend(answer_token_ids)
             label_ids.extend([-100] * len(question_token_ids))
             label_ids.extend(answer_token_ids)
+        
+        if self.test:
+            return {'q_str': q_str}
+        else:
+            # Cut off the excess
+            input_ids = input_ids[:self.max_length]
+            label_ids = label_ids[:self.max_length]
 
-        # Cut off the excess
-        input_ids = input_ids[:self.max_length]
-        label_ids = label_ids[:self.max_length]
+            padding_length = self.max_length - len(input_ids)
+            if padding_length > 0: 
+                input_ids += [self.tokenizer.pad_token_id] * padding_length
+                label_ids += [self.tokenizer.pad_token_id] * padding_length
 
-        retval = {
-            "input_ids" : torch.LongTensor(input_ids),
-            "labels" :  torch.LongTensor(label_ids)
-        }
-        gc.collect()
-        return retval
+            retval = {
+                "input_ids" : torch.LongTensor(input_ids),
+                "labels" :  torch.LongTensor(label_ids)
+            }
+            gc.collect()
+            return retval
 
 
 if __name__ == '__main__':
