@@ -113,6 +113,7 @@ class Seq2Seq(nn.Module):
         else:
             #Predict
             preds=[]
+            outs=[]
             zero=torch.cuda.LongTensor(1).fill_(0)
             for i in range(source_ids.shape[0]):
                 context=encoder_output[:,i:i+1]
@@ -121,6 +122,8 @@ class Seq2Seq(nn.Module):
                 input_ids=beam.getCurrentState()
                 context=context.repeat(1, self.beam_size,1)
                 context_mask=context_mask.repeat(self.beam_size,1)
+                
+                inside_outs = []
                 for _ in range(self.max_length):
                     if beam.done():
                         break
@@ -136,6 +139,8 @@ class Seq2Seq(nn.Module):
                     out = torch.tanh(self.dense(out))
                     hidden_states=out.permute([1,0,2]).contiguous()[:,-1,:]
                     out = self.lsm(self.lm_head(hidden_states)).data
+                   
+                    inside_outs.append(out)
                     beam.advance(out)
                     input_ids.data.copy_(input_ids.data.index_select(0, beam.getCurrentOrigin()))
                     input_ids=torch.cat((input_ids,beam.getCurrentState()),-1)
@@ -143,13 +148,14 @@ class Seq2Seq(nn.Module):
                 pred=beam.buildTargetTokens(hyp)[:self.beam_size]
                 pred=[torch.cat([x.view(-1) for x in p]+[zero]*(self.max_length-len(p))).view(1,-1) for p in pred]
                 preds.append(torch.cat(pred,0).unsqueeze(0))
+                outs.append(inside_outs)
 
             preds=torch.cat(preds,0)
             if self.trainer:
                 preds = transformers.modeling_outputs.Seq2SeqLMOutput(
                     logits=out)
 
-            return preds
+            return preds, outs
 
 
 

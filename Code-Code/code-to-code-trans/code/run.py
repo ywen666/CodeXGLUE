@@ -561,20 +561,56 @@ def main():
             eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
 
             model.eval()
-            p=[]
+
+            # p=[]
+            # p[0]] will hold the 0-th beam outputs for all test data
+            # p[1]] will hold the 1-th beam outputs for all test data
+            # and so on
+            next_token_prob = dict()
+            p=[[] for _ in range(args.beam_size)]
+
             eval_loss,tokens_num = 0,0
             for batch in tqdm(eval_dataloader,total=len(eval_dataloader)):
                 batch = tuple(t.to(device) for t in batch)
                 source_ids,source_mask,target_ids,target_mask = batch
                 with torch.no_grad():
-                    preds = model(source_ids=source_ids,source_mask=source_mask)
-                    for pred in preds:
-                        t=pred[0].cpu().numpy()
-                        t=list(t)
-                        if 0 in t:
-                            t=t[:t.index(0)]
-                        text = tokenizer.decode(t,clean_up_tokenization_spaces=False)
-                        p.append(text)
+
+                    preds, outs = model(source_ids=source_ids,source_mask=source_mask)
+                    #print(len(preds)) 
+                    #print(preds[0].shape) 
+                    #print(len(outs)) 
+                    #print([len(outs[j]) for j in range(len(outs))]) 
+                    #print(outs[0][0].shape) 
+                    #print([len(outs[j]) for j in range(len(outs))]) 
+                    #print([outs[0][j].shape for j in range(10)]) 
+                    for jjj, pred in enumerate(preds):
+                        out_id = outs[jjj]
+                        out_i = [outs[jjj][j].cpu().numpy() for j in range(len(outs[jjj]))]
+                        #print(len(out_i))
+                        #print([o.shape for o in out_i]) 
+                        for j, pred_i in enumerate(pred):
+                            t=pred_i.cpu().numpy()
+                            #print(t.shape)
+                            probs = [out_i[k][j] for k in range(len(out_i))]
+                            #print(len(probs))
+                            #print([ probs[i] for i in range(len(probs))])
+                             
+                            for l in range(len(probs)):
+                                pred_value = t[l]
+                                
+                                beam_prob = probs[l][pred_value]
+                                if l not in next_token_prob:
+                                    next_token_prob[l] = [0, 0.]
+                                next_token_prob[l][0] += 1
+                                next_token_prob[l][1] += np.exp(beam_prob)
+                                #print(pred_value, beam_prob)
+
+                            t=list(t)
+                            if 0 in t:
+                                t=t[:t.index(0)]
+                            text = tokenizer.decode(t,clean_up_tokenization_spaces=False)
+                            p[j].append(text)
+            
 
                     _,loss,num = model(source_ids=source_ids,source_mask=source_mask,
                                        target_ids=target_ids,target_mask=target_mask)
@@ -582,19 +618,44 @@ def main():
                     tokens_num += num.sum().item()
                 eval_loss = eval_loss / tokens_num
 
+            aggregate_next_token_prob = [0, 0.]
+            cumul_value = 0.0
+            for key in sorted(next_token_prob.keys()):
+                if key < 8:
+                    continue
+                tuple_value = next_token_prob[key]
+                _value = tuple_value[1] / tuple_value[0]
+                aggregate_next_token_prob[0] += tuple_value[0]
+                aggregate_next_token_prob[1] += tuple_value[1]
+                #cumul_value += _value 
+                #print("({}, {:.2f})".format(key - 8, _value), end="")
+                print("({}, {:.2f})".format(key - 8, _value))
+            print()
+                
+            #print("(Aggregated next token prob {:.2f})".format( aggregate_next_token_prob[1] / aggregate_next_token_prob[0] ), end='')
+            print("(Aggregated next token prob {:.2f})".format( aggregate_next_token_prob[1] / aggregate_next_token_prob[0] ))
             eval_ppl = round(np.exp(eval_loss),5)
             model.train()
             predictions=[]
 
             accs=[]
-            with open(os.path.join(args.output_dir,"test_{}.output".format(str(idx))),'w') as f, open(os.path.join(args.output_dir,"test_{}.gold".format(str(idx))),'w') as f1:
-                for ref,gold in zip(p,eval_examples):
-                    predictions.append(str(gold.idx)+'\t'+ref)
-                    f.write(ref+'\n')
+#            with open(os.path.join(args.output_dir,"test_{}.output".format(str(idx))),'w') as f, open(os.path.join(args.output_dir,"test_{}.gold".format(str(idx))),'w') as f1:
+#                for ref,gold in zip(p,eval_examples):
+#                    predictions.append(str(gold.idx)+'\t'+ref)
+#                    f.write(ref+'\n')
+            for beam_idx in range(args.beam_size):
+                with open(os.path.join(args.output_dir,"test_{}_beam_{}.output".format(str(idx), str(beam_idx))),'w') as f:
+                    for ref in p[beam_idx]:
+                        f.write(ref+'\n')
+
+            with open(os.path.join(args.output_dir,"test_{}.gold".format(str(idx))),'w') as f1:
+                for ref,gold in zip(p[0],eval_examples):
                     f1.write(gold.target+'\n')
+                    predictions.append(str(gold.idx)+'\t'+ref)
                     accs.append(ref==gold.target)
             dev_bleu=round(_bleu(os.path.join(args.output_dir, "test_{}.gold".format(str(idx))).format(file),
-                                 os.path.join(args.output_dir, "test_{}.output".format(str(idx))).format(file)),2)
+                                 os.path.join(args.output_dir, "test_{}_beam_0.output".format(str(idx))).format(file)),2)
+                                 #os.path.join(args.output_dir, "test_{}.output".format(str(idx))).format(file)),2)
             logger.info("  %s = %s "%("eval_loss",str(eval_loss)))
             logger.info("  %s = %s "%("eval_ppl",str(eval_ppl)))
             logger.info("  %s = %s "%("bleu-4",str(dev_bleu)))
